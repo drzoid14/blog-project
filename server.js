@@ -2,24 +2,39 @@
 const express = require('express');
 const morgan = require('morgan');
 const bodyParser = require('body-parser');
+const mongoose =require('mongoose');
+const PORT = require('./config');
+const {DATABASE_URL} = require('./config');
 
-const { BlogPosts } = require('./models');
+
+const { BlogPost } = require('./models');
 
 const jsonParser = bodyParser.json();
 const app = express();
 
 app.use(morgan('common'));
 app.use(jsonParser);
+app.use(express.json());
 
 //making a post on start in order to test the get() function
-BlogPosts.create('Day 1', 'I suppose it\'s time to party', 'Some Guy', 'May 22, 2018');
+BlogPost.create({title: 'Day 1', content:'I suppose it\'s time to party', author:'Some Guy', date:'May 22, 2018'});
+
 
 
 app.get('/', (req, res) => {
-    res.json(BlogPosts.get());
-    console.log('Getting the Blog Posts')
+    console.log('starting to look')
+    BlogPost
+        .find()
+        .then(blogPosts => res.json(blogPosts))
+        .catch(err => {
+            console.error(err)
+            res.status(500).json({ message: 'ABORT ABORT ABORT' })
+        });
 });
 
+
+
+//Posting with Mongoose
 app.post('/', (req, res) => {
     console.log('posting a new blog');
     //check to make sure proper keys are being received
@@ -33,9 +48,20 @@ app.post('/', (req, res) => {
             return res.status(400).send(message);
         }
     }
-    const post = BlogPosts.create(req.body.title, req.body.content, req.body.author, req.body.publishDate);
-    res.status(201).json(post);
-})
+    BlogPost
+        .create({
+            title: req.body.title,
+            content: req.body.content,
+            author: req.body.author,
+            publishDate: req.body.publishDate
+        })
+        .then(
+            blogPosts => res.status(201).json(blogPosts.serialize()))
+        .catch(err => {
+            console.error(err);
+            res.status(500).json({ message: 'MAYDAY MAYDAY MAYDAY' });
+        });
+});
 
 app.put('/:id', (req, res) => {
     console.log("updating a post");
@@ -55,56 +81,71 @@ app.put('/:id', (req, res) => {
         return res.status(400).send(message);
     }
     console.log("Ship Shape so far");
-    const post = BlogPosts.update(req.body);
-    res.status(200).json(post);
-});
+    BlogPost
+    .findByIdAndUpdate(req.params.id,{$set: req.body}, {new: true})
+    .then(updated => res.status(204).end())
+    .catch(err => res.status(500).json({error:'WOMEN AND CHILDREN FIRST'}));
 
-app.delete('/:id', (req,res) =>{
+    });
+
+
+app.delete('/:id', (req, res) => {
     console.log('deleting a post');
-    BlogPosts.delete(req.params.id);
-    res.sendStatus(200);
-})
-
-
-
-app.listen(process.env.PORT || 8080, () => {
-    console.log(`Your app is listening on port ${process.env.PORT || 8080}`);
+    BlogPost
+    .findByIdAndRemove(req.params.id)
+    .then(() => {
+    res.sendStatus(204);
+    })
+    .catch(err => {
+        res.status(500).json({error: 'ABANDON SHIP ABANDON SHIP'})
+    });
 });
+
+ 
+
+
 
 let server;
 
 
-function runServer() {
-  const port = process.env.PORT || 8080;
-  return new Promise((resolve, reject) => {
-    server = app.listen(port, () => {
-      console.log(`Your app is listening on port ${port}`);
-      resolve(server);
-    }).on('error', err => {
-      reject(err)
+function runServer(databaseUrl, port=process.env.PORT||8080)  {
+return new Promise((resolve, reject) => {
+    mongoose.connect(databaseUrl, err => {
+      if (err) {
+        return reject(err);
+      }
+      server = app.listen(port, () => {
+        console.log(`Your app is listening on port ${port}`);
+        resolve();
+      })
+        .on('error', err => {
+          mongoose.disconnect();
+          reject(err);
+        });
     });
   });
 }
 
 
 function closeServer() {
-  return new Promise((resolve, reject) => {
-    console.log('Closing server');
-    server.close(err => {
-      if (err) {
-        reject(err);
-        
-        return;
-      }
-      resolve();
+    return mongoose.disconnect().then(()=> {
+    return new Promise((resolve, reject) => {
+        console.log('Closing server');
+        server.close(err => {
+            if (err) {
+                reject(err);
+
+                return;
+            }
+            resolve();
+        });
     });
-  });
-}
+})}
 
 // if server.js is called directly (aka, with `node server.js`), this block
 // runs. but we also export the runServer command so other code (for instance, test code) can start the server as needed.
 if (require.main === module) {
-  runServer().catch(err => console.error(err));
+    runServer(DATABASE_URL).catch(err => console.error(err));
 };
 
-module.exports = {app, runServer, closeServer};
+module.exports = { app, runServer, closeServer };
